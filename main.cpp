@@ -218,6 +218,7 @@ int main(int argc, const char** argv)
 	for (int i = 0; i < 8; ++i)
 		for (int j = 0; j < 8; ++j)
 			pix[i * 8 + j] = (i & 1) ^ (j & 1) ? 0xFF000000 : 0xFFFFFFFF;
+	pix[7 * 8] = 0xFF777700;
 
 	D3DLOCKED_RECT rect;
 	HR_CHECK(checker->LockRect(0, &rect, NULL, D3DUSAGE_WRITEONLY));
@@ -304,13 +305,13 @@ int main(int argc, const char** argv)
 	const char* vs_render_to_texture = STR(
 		struct vertex_t
 		{
-			float2 pos : POSITION;
+			float2 pos : POSITION0;
 			float2 uv  : TEXCOORD0;
 		};
 
 		struct interp_t
 		{
-			float4 posH : POSITION;
+			float4 posH : POSITION0;
 			float2 uv   : TEXCOORD0;
 		};
 
@@ -320,7 +321,7 @@ int main(int argc, const char** argv)
 		interp_t main(vertex_t vtx)
 		{
 			vtx.pos.x += u_x;
-			float4 posH = float4(vtx.pos, 0, 1);
+			float4 posH = mul(u_mvp, float4(vtx.pos, 0, 1));
 
 			interp_t interp;
 			interp.posH = posH;
@@ -332,7 +333,7 @@ int main(int argc, const char** argv)
 	const char* ps_render_to_texture = STR(
 		struct interp_t
 		{
-			float4 posH : POSITION;
+			float4 posH : POSITION0;
 			float2 uv   : TEXCOORD0;
 		};
 
@@ -358,11 +359,11 @@ int main(int argc, const char** argv)
 	for (int i = 0; i < 2; ++i)
 	{
 		desc[i].Stream = 0;
-		desc[i].Offset = 0;
+		desc[i].Offset = (WORD)(i * sizeof(v2));
 		desc[i].Type = D3DDECLTYPE_FLOAT2;
 		desc[i].Method = (BYTE)D3DDECLMETHOD_DEFAULT;
 		desc[i].Usage = i == 0 ? (BYTE)D3DDECLUSAGE_POSITION : (BYTE)D3DDECLUSAGE_TEXCOORD;
-		desc[i].UsageIndex = (BYTE)(i == 0 ? 0 : i -1);
+		desc[i].UsageIndex = 0;
 	}
 	desc[2] = D3DDECL_END();
 	HR_CHECK(dev->CreateVertexDeclaration(desc, &decl));
@@ -374,17 +375,17 @@ int main(int argc, const char** argv)
 	HR_CHECK(vertex_buffer->Lock(0, sizeof(vertex_t) * 6, &vertices, D3DLOCK_NOOVERWRITE));
 	vertex_t quad[6];
 
-	quad[0].pos = v2(-0.5f, 0.5f);  quad[0].uv = v2(0, 1);
-	quad[1].pos = v2(-0.5f, -0.5f); quad[0].uv = v2(0, 0);
-	quad[2].pos = v2(0.5f, 0.5f);   quad[0].uv = v2(1, 1);
+	quad[0].pos = v2(-0.5f, 0.5f); quad[0].uv = v2(0, 0);
+	quad[1].pos = v2(0.5f, -0.5f); quad[1].uv = v2(1, 1);
+	quad[2].pos = v2(0.5f, 0.5f);  quad[2].uv = v2(1, 0);
 
-	quad[3].pos = v2(0.5f, 0.5f);   quad[0].uv = v2(1, 1);
-	quad[4].pos = v2(-0.5f, -0.5f); quad[0].uv = v2(0, 0);
-	quad[5].pos = v2(0.5f, -0.5f);  quad[0].uv = v2(1, 0);
+	quad[3].pos = v2(-0.5f, 0.5f);  quad[3].uv = v2(0, 0);
+	quad[4].pos = v2(-0.5f, -0.5f); quad[4].uv = v2(0, 1);
+	quad[5].pos = v2(0.5f, -0.5f);  quad[5].uv = v2(1, 1);
 
 	for (int i = 0; i < 6; ++i)
 	{
-		quad[i].pos = quad[i].pos * 1.5f + v2(0, 0);
+		quad[i].pos = quad[i].pos * v2(2.0f, 2.0f);
 	}
 
 	memcpy(vertices, quad, sizeof(vertex_t) * 6);
@@ -394,8 +395,8 @@ int main(int argc, const char** argv)
 	HR_CHECK(dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE));
 	HR_CHECK(dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE));
 	HR_CHECK(dev->SetRenderState(D3DRS_LIGHTING, FALSE));
-	HR_CHECK(dev->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP));
-	HR_CHECK(dev->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP));
+	HR_CHECK(dev->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_MIRROR));
+	HR_CHECK(dev->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_MIRROR));
 
 	while (running)
 	{
@@ -415,32 +416,32 @@ int main(int argc, const char** argv)
 		// Render checkerboard to texture.
 		D3DXHANDLE uniform;
 		HR_CHECK(dev->BeginScene());
-		//HR_CHECK(dev->SetRenderTarget(0, surface));
-		//HR_CHECK(dev->Clear(0, NULL, D3DCLEAR_TARGET, 0xFFFF0000, 1.0f, 0));
+		HR_CHECK(dev->SetRenderTarget(0, surface));
+		HR_CHECK(dev->Clear(0, NULL, D3DCLEAR_TARGET, 0xFFFF0000, 1.0f, 0));
 
-		//	HR_CHECK(dev->SetVertexShader(render_to_texture_vertex_shader));
-		//	HR_CHECK(dev->SetPixelShader(render_to_texture_pixel_shader));
+			HR_CHECK(dev->SetVertexShader(render_to_texture_vertex_shader));
+			HR_CHECK(dev->SetPixelShader(render_to_texture_pixel_shader));
 
-		//	//uniform = render_to_texture_vertex_constant_table->GetConstantByName(0, "u_mvp");
-		//	//float identity[16];
-		//	//memset(identity, 0, sizeof(*identity));
-		//	//identity[0] = 1.0f;
-		//	//identity[5] = 1.0f;
-		//	//identity[10] = 1.0f;
-		//	//identity[15] = 1.0f;
-		//	//HR_CHECK(fullscreen_vertex_constant_table->SetValue(dev, uniform, identity, sizeof(float) * 16));
+			float identity[16];
+			uniform = render_to_texture_vertex_constant_table->GetConstantByName(0, "u_mvp");
+			memset(identity, 0, sizeof(identity));
+			identity[0] = 1.0f;
+			identity[5] = 1.0f;
+			identity[10] = 1.0f;
+			identity[15] = 1.0f;
+			HR_CHECK(fullscreen_vertex_constant_table->SetValue(dev, uniform, identity, sizeof(float) * 16));
 
-		//	static float x = 0;
-		//	//x += 0.01f;
-		//	uniform = render_to_texture_vertex_constant_table->GetConstantByName(0, "u_x");
-		//	HR_CHECK(fullscreen_vertex_constant_table->SetValue(dev, uniform, &x, sizeof(float)));
+			static float x = 0;
+			x += 0.001f;
+			uniform = render_to_texture_vertex_constant_table->GetConstantByName(0, "u_x");
+			HR_CHECK(fullscreen_vertex_constant_table->SetValue(dev, uniform, &x, sizeof(float)));
 
-		//	HR_CHECK(dev->SetTexture(0, checker));
+			HR_CHECK(dev->SetTexture(0, checker));
 
-		//	HR_CHECK(dev->SetStreamSource(0, vertex_buffer, 0, sizeof(vertex_t)));
-		//	HR_CHECK(dev->SetVertexDeclaration(decl));
+			HR_CHECK(dev->SetStreamSource(0, vertex_buffer, 0, sizeof(vertex_t)));
+			HR_CHECK(dev->SetVertexDeclaration(decl));
 
-		//	HR_CHECK(dev->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 6));
+			HR_CHECK(dev->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 6));
 
 		// Render texture to full-screen;
 		HR_CHECK(dev->SetRenderTarget(0, screen_surface));
@@ -449,7 +450,7 @@ int main(int argc, const char** argv)
 			HR_CHECK(dev->SetVertexShader(fullscreen_vertex_shader));
 			HR_CHECK(dev->SetPixelShader(fullscreen_pixel_shader));
 
-			HR_CHECK(dev->SetTexture(0, checker));
+			HR_CHECK(dev->SetTexture(0, texture));
 
 			HR_CHECK(dev->SetStreamSource(0, vertex_buffer, 0, sizeof(vertex_t)));
 			HR_CHECK(dev->SetVertexDeclaration(decl));
@@ -460,11 +461,7 @@ int main(int argc, const char** argv)
 		dev->Present(NULL, NULL, NULL, NULL);
 
 		// Save rendered texture to file.
-		static int save = 1;
-		if (save) {
-			HR_CHECK(D3DXSaveTextureToFile("render_to_texture.png", D3DXIFF_PNG, texture, NULL));
-			save = 0;
-		}
+		HR_CHECK(D3DXSaveTextureToFile("render_to_texture.png", D3DXIFF_PNG, texture, NULL));
 	}
 
 	return 0;
